@@ -1,0 +1,146 @@
+---
+title: "Practical Machine Learning - Course Project"
+author: "Shuoyenl"
+date: "Wednesday, August 19, 2015"
+output: html_document
+---
+This report investigates the data about personal activity from [Groupware at LES](http://groupware.les.inf.puc-rio.br/har)
+and use them to train a model which could be used to predict the manner in which
+**classe** they did the exercise.
+
+##Read in data
+The [training data](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv) and the [testing data](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv) are loaded.
+```{r message=FALSE, warning=FALSE}
+training <- read.csv("pml-training.csv", na.strings=c("NA","#DIV/0!",""))
+testing <- read.csv("pml-testing.csv", na.strings=c("NA","#DIV/0!",""))
+
+library(caret); library(kernlab);
+set.seed(20150819)
+```
+
+
+##Preprocess data
+The index column is removed since it may have no affect to the classe.
+```{r}
+modTraining <- training[c(-1)]
+```
+
+The columns that contain all NA's are also removed while they provide no 
+information.
+```{r}
+allNaCols <- apply(modTraining, 2, function(x) all(is.na(x)))
+modTraining <- modTraining[, !allNaCols]
+```
+
+The rest NA's are replaced with the mean of the corresponding column. The more
+NA's a column contains, the lower impact it has to our model.
+```{r}
+replaceNaWithMean <- function(data) {    
+    for(i in 1:ncol(data)){
+        if ((is.numeric(data[,i])) || (is.integer(data[,i])))
+        {
+            data[is.na(data[,i]), i] <- mean(data[,i], na.rm = T)
+        }
+    }
+    data
+}
+modTraining <- replaceNaWithMean(modTraining)
+
+```
+
+We then remove the columns with near zero variance.
+```{r}
+modTraining <- modTraining[, -nearZeroVar(modTraining)]
+```
+
+
+
+##Separate the training data to internal training and testing set
+We separate the training data to two grousp: 75% for our internal training and
+25% for the internal testing
+```{r}
+inTrain <- createDataPartition(y=modTraining$classe, p=.75, list=F)
+myTraining <- modTraining[inTrain,]
+myTesting <- modTraining[-inTrain,]
+
+```
+
+
+##Training
+Build models using the internal training set.
+
+### Model 1 - Decision Tree
+The rpart in the caret package is used to train a model of the decision tree.
+The result is shown below.
+```{r message=FALSE, warning=FALSE}
+modelFit1 <- train(classe~., data=myTraining, method="rpart")
+library(rattle)
+fancyRpartPlot(modelFit1$finalModel)
+```
+
+
+### Model 2 - Random Forest
+The random forest, which is believed to outpeform the decision tree, is used to 
+train the second model.
+```{r message=FALSE, warning=FALSE}
+library(randomForest)
+modelFit2 <- randomForest(classe~., data=myTraining)
+```
+
+
+##Prediction
+We then evaluate the two models based on the predictions on the internal testing
+data.
+
+### Model 1 - Decision Tree
+```{r}
+p1 <- predict(modelFit1, newdata=myTesting)
+c1 <- confusionMatrix(p1, myTesting$classe)
+c1$overall
+```
+The accuracy of Model 1 is 0.6015.
+
+### Model 2 - Random Forest
+```{r}
+p2 <- predict(modelFit2, newdata=myTesting)
+c2 <- confusionMatrix(p2, myTesting$classe)
+c2$overall
+```
+The accuracy of Model 2 is 0.9994, which is much better than the rpart decision 
+tree.
+
+
+## Prediction on the Testing data
+Model 2 is chosen to predict on the actual testing data. The result text files
+are generated as instructed by the [Course Project: Submission Page](https://class.coursera.org/predmachlearn-031/assignment/view?assignment_id=5)
+
+```{r}
+modTesting <- testing[, names(testing) %in% names(modTraining)]
+modTesting <- data.frame(modTesting, classe=as.factor(NA))
+
+coerceColClass <- function(from, to){  
+    for(i in 1:ncol(to)){
+        for(j in 1:ncol(from)){
+            if (names(to[i]) == names(from[j])){
+                class(to[i]) <- class(from[j])
+            }
+        }
+    }
+    to <- rbind(from[1,], to)
+    to <- to[c(-1),]    
+    to
+}
+
+modTesting <- coerceColClass(modTraining, modTesting)
+p <- predict(modelFit2, newdata=modTesting)
+
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(p)
+```
